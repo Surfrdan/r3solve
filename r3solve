@@ -8,6 +8,7 @@ import datetime
 import random
 import time
 from dns import resolver
+from dns.exception import DNSException
 from termcolor import colored
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -46,22 +47,24 @@ def timestamp():
 
 def get_resolver():
     res = resolver.Resolver()
-    res.nameservers = ['8.8.8.8','1.1.1.1']
+    res.nameservers = ['1.1.1.1','8.8.8.8']
     return res
 
 def make_request(host):
-    global request_count, file_count, args, res
+    global request_count, file_count, res
     request_count += 1
-
     #if args.ratelimit:
     #    time.sleep(args.ratelimit)
 
     try:
         answers = res.query(host)
-        for rdata in answers:
-            print(host)
-    except (ConnectionError, ProxyError, SSLError, Timeout, Error) as e:
-        print(e)
+        if answers:
+            for rdata in answers:
+                print(host)
+        else:
+            print('weirdness')
+    except (DNSException) as e:
+        #print('Exception {0}'.format(e))
         pass
 
 def read_hostlist():
@@ -69,6 +72,7 @@ def read_hostlist():
         hostlist = open(args.hostlist, encoding = "ISO-8859-1")
         hosts = hostlist.read().splitlines()
         if hosts:
+            print('{0} hosts read from {1}'.format(len(hosts), hostlist.name))
             return hosts
         else:
             print("Empty hostlist supplied.. nothing to resolve")
@@ -76,32 +80,29 @@ def read_hostlist():
     except NameError:
         pass
 
-def main_loop(hosts, args):
+def main_loop(hosts):
     global file_count
-    #resolved_hosts = list()
     for idx, host in enumerate(hosts):
         file_count += 1
-        host = str(host).strip()
+        h = str(host).strip()
 
         if args.prefix:
-            host = '{0}{1}'.format(args.prefix, host)
+            h = '{0}{1}'.format(args.prefix, host)
         if args.suffix:
-            host = '{0}{1}'.format(host, args.suffix)
-        hosts[idx] = host
-
+            h = '{0}{1}'.format(host, args.suffix)
+        hosts[idx] = h
     pool = ThreadPool(args.threads)
     new_results = pool.map_async(make_request, hosts)
     pool.close()
     pool.join()
-    return True
 
 try:
     file_count = 0
     request_count = 0
     print_banner()
-    res = get_resolver()
     args = parse_args()
+    res = get_resolver()
     hosts = read_hostlist()
-    main_loop(hosts, args)
+    main_loop(hosts)
 except KeyboardInterrupt:
     sys.exit(1)
