@@ -62,6 +62,7 @@ def make_request(host):
         answers = res.query(host)
         if answers:
             print(host)
+            sys.stdout.flush()
         else:
             pass
     except (DNSException) as e:
