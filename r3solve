@@ -56,8 +56,9 @@ def make_request(host):
 
     try:
         answers = res.query(host)
-        if str(args.ignore) == str(answers.rrset[0]):
-            return 
+        if args.ignore:
+            if str(answers.rrset[0]) in args.ignore:
+                return 
         if answers:
             print(host)
             sys.stdout.flush()
@@ -104,6 +105,9 @@ try:
     request_count = 0
     if not args.quiet:
         print_banner()
+    if args.ignore:
+        args.ignore = [str(x) for x in args.ignore.split(',')]
+
     res = get_resolver()
     hosts = read_hostlist()
     main_loop(hosts)
