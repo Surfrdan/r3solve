@@ -7,7 +7,7 @@ import sys
 import datetime
 import random
 import time
-from dns import resolver
+from dns import resolver,reversename
 from dns.exception import DNSException
 from termcolor import colored
 
@@ -22,7 +22,8 @@ def parse_args():
     arg_s_help = 'Optional suffix e.g. google.com'
     arg_i_help = 'IPs to ignore'
     arg_l_help = 'Rate Limit in requests per minute'
-    arg_q_help = 'Qiet mode. No debug or banner just the hosts'
+    arg_q_help = 'Quiet mode. No debug or banner just the hosts'
+    arg_D_help = 'Debug mode'
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-w', '--hostlist', type=str, help=arg_w_help, nargs='?', required=True)
@@ -32,6 +33,7 @@ def parse_args():
     parser.add_argument('-s', '--suffix', type=str, help=arg_s_help, default=False)
     parser.add_argument('-i', '--ignore', type=str, help=arg_i_help, default=False)
     parser.add_argument('-q', '--quiet', help=arg_q_help, action='store_true')
+    parser.add_argument('-D', '--debug', action='store_true', help=arg_D_help, default=False)
     return parser.parse_args()
 
 def print_banner():
@@ -47,15 +49,40 @@ def print_banner():
 
 def get_resolver():
     res = resolver.Resolver()
-    res.nameservers = ['1.1.1.1','8.8.8.8']
+    #res.nameservers = ['1.1.1.1','8.8.8.8']
     return res
+
+def is_ipaddress(address):
+    parts = address.split(".")
+    if len(parts) != 4:
+        return False
+    for item in parts:
+        try:
+            i = int(item)
+        except ValueError:
+            return False
+        if not str.isnumeric(i):
+            return False
+        if not i <= 255:
+            return False 
+
+    return True
 
 def make_request(host):
     global request_count, file_count, res
     request_count += 1
-
     try:
-        answers = res.query(host)
+        if is_ipaddress(host):
+            try:
+                host = reversename.from_address(host)
+                print(str(resolver.query(host,"PTR")[0]))
+            except (Exception) as e:
+                if args.debug:
+                    print(sys.exc_info()[0])
+                    print(e) 
+            return
+        else:
+            answers = res.query(host)
         if args.ignore:
             if str(answers.rrset[0]) in args.ignore:
                 return 
@@ -65,7 +92,9 @@ def make_request(host):
         else:
             pass
     except (DNSException) as e:
-        #print('Exception {0}'.format(e))
+        if args.debug:
+            print(sys.exc_info()[0])
+            print(e)
         pass
 
 def read_hostlist():
@@ -90,9 +119,9 @@ def main_loop(hosts):
         h = str(host).strip()
 
         if args.prefix:
-            h = '{0}{1}'.format(args.prefix, host)
+            h = '{0}{1}'.format(args.prefix, h)
         if args.suffix:
-            h = '{0}{1}'.format(host, args.suffix)
+            h = '{0}{1}'.format(h, args.suffix)
         hosts[idx] = h
     pool = ThreadPool(args.threads)
     new_results = pool.map_async(make_request, hosts)
