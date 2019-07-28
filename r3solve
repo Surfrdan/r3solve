@@ -23,6 +23,7 @@ def parse_args():
     arg_i_help = 'IPs to ignore'
     arg_l_help = 'Rate Limit in requests per minute'
     arg_q_help = 'Quiet mode. No debug or banner just the hosts'
+    arg_r_help = 'Resolvers file'
     arg_D_help = 'Debug mode'
 
     parser = argparse.ArgumentParser()
@@ -32,23 +33,14 @@ def parse_args():
     parser.add_argument('-p', '--prefix', type=str, help=arg_p_help, default=False)
     parser.add_argument('-s', '--suffix', type=str, help=arg_s_help, default=False)
     parser.add_argument('-i', '--ignore', type=str, help=arg_i_help, default=False)
-    parser.add_argument('-q', '--quiet', help=arg_q_help, action='store_true')
+    parser.add_argument('-r', '--resolvers', type=str, help=arg_r_help, default="{}/resolvers.txt".format(script_dir))
     parser.add_argument('-D', '--debug', action='store_true', help=arg_D_help, default=False)
     return parser.parse_args()
 
-def print_banner():
-    banner = """ 
-             _____           _
-         _ _|___ / ___  ___ | |_   _____
-        | '__||_ \/ __|/ _ \| \ \ / / _ \ 
-        | |  ___) \__ \ (_) | |\ V /  __/
-        |_| |____/|___/\___/|_| \_/ \___|
-           A DNS Resolver Tool - By Surfrdan
-   """
-    print(colored(banner, 'magenta'))
-
 def get_resolver():
     res = resolver.Resolver()
+    f = open(args.resolvers)
+    res.nameservers = f.read().splitlines()
     #res.nameservers = ['1.1.1.1','8.8.8.8']
     return res
 
@@ -61,11 +53,10 @@ def is_ipaddress(address):
             i = int(item)
         except ValueError:
             return False
-        if not str.isnumeric(i):
+        if not str(i).isnumeric():
             return False
         if not i <= 255:
             return False 
-
     return True
 
 def make_request(host):
@@ -75,7 +66,7 @@ def make_request(host):
         if is_ipaddress(host):
             try:
                 host = reversename.from_address(host)
-                print(str(resolver.query(host,"PTR")[0]))
+                print(str(resolver.query(host,"PTR")[0])[:-1])
             except (Exception) as e:
                 if args.debug:
                     print(sys.exc_info()[0])
@@ -102,12 +93,8 @@ def read_hostlist():
         hostlist = open(args.hostlist, encoding = "ISO-8859-1")
         hosts = hostlist.read().splitlines()
         if hosts:
-            if not args.quiet:
-                print('{0} hosts read from {1}'.format(len(hosts), hostlist.name))
             return hosts
         else:
-            if not args.quiet:
-                print("Empty hostlist supplied.. nothing to resolve")
             return []
     except NameError:
         pass
@@ -132,8 +119,6 @@ try:
     args = parse_args()
     file_count = 0
     request_count = 0
-    if not args.quiet:
-        print_banner()
     if args.ignore:
         args.ignore = [str(x) for x in args.ignore.split(',')]
 
