@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <stdbool.h>
@@ -45,6 +46,7 @@ struct QUESTION
     unsigned short qclass;
 };
 
+#pragma pack(push, 1)
 struct R_DATA
 {
     unsigned short type;
@@ -52,6 +54,7 @@ struct R_DATA
     unsigned int ttl;
     unsigned short data_len;
 };
+#pragma pack(pop)
 
 struct RES_RECORD
 {
@@ -70,7 +73,7 @@ typedef struct
 // loads hosts from hosts.txt in current dir with 120 threads
 
 void *process_hosts(void *data);
-bool lookup_host(char *host);
+bool lookup_host(unsigned char *host);
 
 pthread_t thread_id[MAX_THREADS];
 pthread_mutex_t a_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -78,31 +81,22 @@ char **hosts;
 int nexthost = 0;
 int hosts_count;
 
-bool lookup_host(char *host) {
-    int sockfd, portno, n;
-    char recvBuff[512];
-    char *qname,*reader;
-    struct sockaddr_in serv_addr;
-    
-    memset(recvBuff, '0',sizeof(recvBuff));    
-    if((sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-        return 1;
-    }
-    memset(&serv_addr, '0', sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(53);
-    if(inet_pton(AF_INET, "8.8.8.8", &serv_addr.sin_addr)<=0) {
-        return 1;
-    }
-    if( connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        return 1; 
-    }
-
+bool lookup_host(unsigned char *host) {
+    int s;
+    unsigned char buf[512];
+    unsigned char *qname,*reader;
+    struct sockaddr_in dest;
     struct DNS_HEADER *dns = NULL;
     struct QUESTION *qinfo = NULL;
 
-    dns = (struct DNS_HEADER *) &recvBuff;
-    dns->id = 1;
+    s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    //memset(&dest, '0', sizeof(dest));
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(53);
+    dest.sin_addr.s_addr = inet_addr("8.8.8.8");
+    
+    dns = (struct DNS_HEADER *)&buf;
+    dns->id = (unsigned short) htons(getpid());
     dns->qr = 0;
     dns->opcode = 0;
     dns->aa = 0;
@@ -118,35 +112,34 @@ bool lookup_host(char *host) {
     dns->auth_count = 0;
     dns->add_count = 0;
 
-    qname = (unsigned char*)&recvBuff[sizeof(struct DNS_HEADER)];
-    int lock = 0, i; ;
-    for (i = 0; i<strlen(host); i++ ) {
-        if(host[i]=='.') {
-            *qname++ = i - lock;
-            for(;lock<i; lock++) {
-                *qname++=host[lock];
-            }
-        }
+    qname = (unsigned char*)&buf[sizeof(struct DNS_HEADER)];
+
+    char *h = host;
+    char formatted_host[300];
+    char* x; 
+    while((x = strsep(&h, ".")) != NULL) {
+        unsigned char new_part[67];
+        snprintf(new_part, 67, "%d%s",strlen(x),x);
+        strcat(formatted_host, new_part);
     }
-    *qname++='\0';
-    qinfo =(struct QUESTION*)&recvBuff[sizeof(struct DNS_HEADER) + (strlen((const char*)qname) + 1)];
+    strcat(qname,formatted_host);
+    qinfo = (struct QUESTION*)&buf[sizeof(struct DNS_HEADER) + (strlen((const char*)qname) + 1)];
     qinfo->qtype = htons(T_A);
     qinfo->qclass = htons(1);
-    int packet_size = sizeof(struct DNS_HEADER) + (strlen((const char*)qname)+1) + sizeof(struct QUESTION); 
-    sendto(sockfd, (char*)recvBuff, packet_size, 0, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
-    i = sizeof(serv_addr);
-	if(recvfrom (sockfd,(char*)recvBuff , 65536 , 0 , (struct sockaddr*)&serv_addr , (socklen_t*)&i ) < 0) {
-		return 1;
-    }
-	dns = (struct DNS_HEADER*) recvBuff;
-	reader = &recvBuff[sizeof(struct DNS_HEADER) + (strlen((const char*)qname)+1) + sizeof(struct QUESTION)];
+    size_t packet_size = sizeof(struct DNS_HEADER) + (strlen((const char*)qname)+1) + sizeof(struct QUESTION); 
+    sendto(s, (char*)buf, packet_size, 0, (struct sockaddr *)&dest, sizeof(dest));
+    int d = sizeof dest;
+	recvfrom(s, (char*)buf, 65536, 0, (struct sockaddr*)&dest, (socklen_t*)&d);
+	dns = (struct DNS_HEADER*) buf;
+	reader = &buf[sizeof(struct DNS_HEADER) + (strlen((const char*)qname)+1) + sizeof(struct QUESTION)];
 	unsigned short answers = ntohs(dns->ans_count);
-	printf("answers %d\n", answers);
+	printf("%d %d %d\n", dns->id, dns->rcode, dns->ans_count);
+    close(s);
 }
 
 void* process_hosts(void* data) {
     int rc;
-    while(nexthost <= hosts_count) {
+    while(nexthost < hosts_count) {
         rc = pthread_mutex_lock(&a_mutex);
         char *host = hosts[nexthost];
         nexthost++;
